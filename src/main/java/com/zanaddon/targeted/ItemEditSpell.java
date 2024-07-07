@@ -1,29 +1,29 @@
 package com.zanaddon.targeted;
 
 import com.nisovin.magicspells.MagicSpells;
-import com.nisovin.magicspells.spells.TargetedEntitySpell;
-import com.nisovin.magicspells.spells.TargetedSpell;
-import com.nisovin.magicspells.util.CastResult;
-import com.nisovin.magicspells.util.MagicConfig;
 import com.nisovin.magicspells.util.SpellData;
+import com.nisovin.magicspells.util.CastResult;
 import com.nisovin.magicspells.util.TargetInfo;
+import com.nisovin.magicspells.util.MagicConfig;
+import com.nisovin.magicspells.spells.TargetedSpell;
 import com.nisovin.magicspells.util.config.ConfigData;
+import com.nisovin.magicspells.spells.TargetedEntitySpell;
 import com.nisovin.magicspells.util.config.ConfigDataUtil;
-import com.nisovin.magicspells.util.magicitems.MagicItemData;
 import com.nisovin.magicspells.util.magicitems.MagicItems;
-import org.bukkit.entity.LivingEntity;
+import com.nisovin.magicspells.handlers.EnchantmentHandler;
+import com.nisovin.magicspells.util.magicitems.MagicItemData;
+
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.inventory.PlayerInventory;
+
 import net.kyori.adventure.text.Component;
 
-import java.awt.*;
-import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.*;
 import java.util.List;
-import java.util.Set;
 
 public class ItemEditSpell extends TargetedSpell implements TargetedEntitySpell {
 
@@ -36,6 +36,9 @@ public class ItemEditSpell extends TargetedSpell implements TargetedEntitySpell 
     private final List<String> resItemLore;
     private final ConfigData<Integer> resItemModelData;
     private final ConfigData<Boolean> resItemUnbreakable;
+    private final List<String> resItemEnchantments;
+    private final ConfigData<Boolean> resItemSafeEnchants;
+    private final ConfigData<Boolean> resItemEnchantmentGlint;
 
     public ItemEditSpell(MagicConfig config, String spellName) {
         super(config, spellName);
@@ -47,6 +50,10 @@ public class ItemEditSpell extends TargetedSpell implements TargetedEntitySpell 
         resItemLore = getConfigStringList("item-lore", null);
         resItemModelData = getConfigDataInt("custom-model-data", null);
         resItemUnbreakable = getConfigDataBoolean("unbreakable", null);
+        resItemEnchantments = getConfigStringList("enchantments", null);
+        resItemSafeEnchants = getConfigDataBoolean("safe-enchants", true);
+        resItemEnchantmentGlint = getConfigDataBoolean("enchantment-glint", null);
+
     }
 
     @Override
@@ -82,8 +89,8 @@ public class ItemEditSpell extends TargetedSpell implements TargetedEntitySpell 
         for (ItemStack item : getInventoryEditItems(precision.get(data), target.getInventory())) {
             setItemMeta(data, item.getItemMeta(), item);
         }
-
-
+        
+        playSpellEffects(data);
         return new CastResult(PostCastAction.HANDLE_NORMALLY, data);
     }
 
@@ -127,7 +134,6 @@ public class ItemEditSpell extends TargetedSpell implements TargetedEntitySpell 
     private void setItemMeta(SpellData data, ItemMeta itemMeta, ItemStack item) {
         if (resItemName != null) itemMeta.displayName(resItemName.get(data));
         if (resItemLore != null) {
-            MagicSpells.error("HEllo world");
             List<Component> resLoreComponents = new ArrayList<>();
             for (String s : resItemLore) {
                 resLoreComponents.add(ConfigDataUtil.getComponent(s).get(data));
@@ -136,6 +142,29 @@ public class ItemEditSpell extends TargetedSpell implements TargetedEntitySpell 
         }
         if (resItemModelData != null) itemMeta.setCustomModelData(resItemModelData.get(data));
         if (resItemUnbreakable != null) itemMeta.setUnbreakable(resItemUnbreakable.get(data));
+        if (resItemEnchantments != null) {
+            Map<Enchantment, Integer> enchantments = new HashMap<>();
+            for (String s : resItemEnchantments) {
+                Enchantment enchant = null;
+                int level = 1;
+                String[] enchantStr = s.split(" ");
+                if (enchantStr[0] != null) enchant = EnchantmentHandler.getEnchantment(enchantStr[0]);
+                if (enchant == null) {
+                    MagicSpells.error("ItemEditSpell '" + internalName + "' has invalid " + enchantStr[0] + " enchantment defined");
+                    continue;
+                }
+                if (enchantStr.length > 1 && enchantStr[1] != null) level = Integer.parseInt(enchantStr[1]);
+                enchantments.put(enchant, level);
+            }
+
+            for (Enchantment oldEnchant : itemMeta.getEnchants().keySet()) {
+                itemMeta.removeEnchant(oldEnchant);
+            }
+            for (Enchantment newEnchant : enchantments.keySet()) {
+                itemMeta.addEnchant(newEnchant, enchantments.get(newEnchant), resItemSafeEnchants.get(data));
+            }
+        }
+        if (resItemEnchantmentGlint != null) itemMeta.setEnchantmentGlintOverride(resItemEnchantmentGlint.get(data));
 
         item.setItemMeta(itemMeta);
     }

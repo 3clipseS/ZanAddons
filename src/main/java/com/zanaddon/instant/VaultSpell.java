@@ -4,19 +4,21 @@ import com.google.common.io.ByteStreams;
 import com.google.common.io.ByteArrayDataInput;
 import com.google.common.io.ByteArrayDataOutput;
 
-import com.nisovin.magicspells.MagicSpells;
 import com.nisovin.magicspells.Spell;
-import com.nisovin.magicspells.spells.command.ScrollSpell;
-import com.nisovin.magicspells.spells.command.TomeSpell;
+import com.nisovin.magicspells.MagicSpells;
 import com.nisovin.magicspells.util.SpellData;
 import com.nisovin.magicspells.util.CastResult;
 import com.nisovin.magicspells.util.MagicConfig;
 import com.nisovin.magicspells.spells.InstantSpell;
 import com.nisovin.magicspells.util.config.ConfigData;
-
+import com.nisovin.magicspells.spells.command.TomeSpell;
 import com.nisovin.magicspells.util.magicitems.MagicItem;
+import com.nisovin.magicspells.spells.command.ScrollSpell;
 import com.nisovin.magicspells.util.magicitems.MagicItems;
+import com.nisovin.magicspells.spelleffects.EffectPosition;
+
 import net.kyori.adventure.text.Component;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -246,6 +248,8 @@ public class VaultSpell extends InstantSpell {
         }
 
         caster.openInventory(playerVault.getInventory());
+
+        playSpellEffects(EffectPosition.CASTER, data.caster(), data);
         return new CastResult(PostCastAction.HANDLE_NORMALLY, data);
     }
 
