@@ -1,10 +1,5 @@
 package com.zanaddon.instant;
 
-import com.destroystokyo.paper.event.player.PlayerJumpEvent;
-import com.google.common.io.ByteStreams;
-import com.google.common.io.ByteArrayDataInput;
-import com.google.common.io.ByteArrayDataOutput;
-
 import com.nisovin.magicspells.Spell;
 import com.nisovin.magicspells.MagicSpells;
 import com.nisovin.magicspells.util.SpellData;
@@ -18,12 +13,14 @@ import com.nisovin.magicspells.spells.command.ScrollSpell;
 import com.nisovin.magicspells.util.magicitems.MagicItems;
 import com.nisovin.magicspells.spelleffects.EffectPosition;
 
+import com.zanaddon.util.ItemUtil;
 import net.kyori.adventure.text.Component;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.InventoryHolder;
@@ -54,8 +51,9 @@ public class VaultSpell extends InstantSpell {
 
     private int[] itemMinQuantities;
     private int[] itemMaxQuantities;
-    private final ConfigData<Boolean> sharedVault;
+    private final ConfigData<String> vaultID;
     private static final Map<UUID,VaultInventory> openedVaultsList = new HashMap<>();
+    private static InventoryCloseListener inventoryCloseListener;
 
     public VaultSpell(MagicConfig config, String spellName) {
         super(config, spellName);
@@ -64,7 +62,7 @@ public class VaultSpell extends InstantSpell {
         title = getConfigDataComponent("title", Component.text("Window Title " + spellName));
 
         overrideItemList = getConfigStringList("override-items", null);
-        sharedVault = getConfigDataBoolean("shared-vault", false);
+        vaultID = getConfigDataString("vault-id", null);
     }
 
     @Override
@@ -194,6 +192,16 @@ public class VaultSpell extends InstantSpell {
                 }
             }
         }
+
+        if (inventoryCloseListener == null) {
+            inventoryCloseListener = new InventoryCloseListener();
+            registerEvents(inventoryCloseListener);
+        }
+    }
+
+    @Override
+    public void turnOff() {
+        inventoryCloseListener = null;
     }
 
     @Override
@@ -203,16 +211,17 @@ public class VaultSpell extends InstantSpell {
         VaultSize vaultSize = this.vaultSize.get(data);
         if (vaultSize == null) return new CastResult(PostCastAction.ALREADY_HANDLED, data);
 
-        File vaultFolder = new File(dataFolder, sharedVault.get(data) ? "shared-vaults" : String.valueOf(caster.getUniqueId()));
+        File vaultFolder = new File(dataFolder, vaultID.get(data) != null ? "shared-vaults" : String.valueOf(caster.getUniqueId()));
         if (!(vaultFolder.exists()))
             vaultFolder.mkdirs();
 
-        File vaultFile = new File(vaultFolder, internalName + ".bin");
+        String vaultFileName = vaultID.get(data) != null ? vaultID.get(data) : internalName;
+        File vaultFile = new File(vaultFolder, vaultFileName + ".bin");
 
-        VaultInventory playerVault = new VaultInventory(internalName, vaultSize.getSize(), title.get(data), vaultFile);
-        if (sharedVault.get(data)) {
+        VaultInventory playerVault = new VaultInventory(vaultFileName, vaultSize.getSize(), title.get(data), vaultFile);
+        if (vaultID.get(data) != null) {
             for (VaultInventory vault : openedVaultsList.values()) {
-                if (vault.getVaultName().equals(internalName)) {
+                if (vault.getVaultName().equals(vaultID.get(data))) {
                     playerVault = vault;
                 }
             }
@@ -228,9 +237,9 @@ public class VaultSpell extends InstantSpell {
                 }
             }
 
-            if (sharedVault.get(data)) openedVaultsList.put(caster.getUniqueId(), playerVault);
-
             caster.openInventory(playerVault.getInventory());
+            if (vaultID.get(data) != null) openedVaultsList.put(caster.getUniqueId(), playerVault);
+
             playSpellEffects(EffectPosition.CASTER, data.caster(), data);
             return new CastResult(PostCastAction.HANDLE_NORMALLY, data);
         }
@@ -238,9 +247,10 @@ public class VaultSpell extends InstantSpell {
         // Create vault file if it does not exist
         if (!(vaultFile.exists())) {
             caster.openInventory(playerVault.getInventory());
-            if (sharedVault.get(data)) openedVaultsList.put(caster.getUniqueId(), playerVault);
+            if (vaultID.get(data) != null) openedVaultsList.put(caster.getUniqueId(), playerVault);
             try {
                 Files.createFile(vaultFile.toPath());
+                Files.write(playerVault.getPlayerVaultFile().toPath(), ItemUtil.serializeItemStackList(Arrays.asList(playerVault.getInventory().getContents())));
             } catch (IOException e) {
                 MagicSpells.error("Vault Spell " + internalName + " encountered an error saving vault file");
                 throw new RuntimeException(e);
@@ -253,7 +263,7 @@ public class VaultSpell extends InstantSpell {
         // Load vault file, set contents of the vault and open the vault
         try {
 
-            ItemStack[] vaultItems = deserializeItemStackByteArray(Files.readAllBytes(vaultFile.toPath()));
+            ItemStack[] vaultItems = ItemUtil.deserializeItemStackByteArray(Files.readAllBytes(vaultFile.toPath()));
             if (vaultItems.length != 0) {
                 if (vaultItems.length > playerVault.getInventory().getSize()) {
                     vaultItems = Arrays.copyOf(vaultItems, playerVault.getInventory().getSize());
@@ -267,7 +277,7 @@ public class VaultSpell extends InstantSpell {
         }
 
         caster.openInventory(playerVault.getInventory());
-        if (sharedVault.get(data)) openedVaultsList.put(caster.getUniqueId(), playerVault);
+        if (vaultID.get(data) != null) openedVaultsList.put(caster.getUniqueId(), playerVault);
 
         playSpellEffects(EffectPosition.CASTER, data.caster(), data);
         return new CastResult(PostCastAction.HANDLE_NORMALLY, data);
@@ -314,54 +324,23 @@ public class VaultSpell extends InstantSpell {
         return new ItemStack(Material.AIR);
     }
 
-    private byte[] serializeItemStackList(List<ItemStack> items) {
-        ByteArrayDataOutput stream = ByteStreams.newDataOutput();
+    private static class InventoryCloseListener implements Listener {
+        @EventHandler
+        public void onInventoryClose(InventoryCloseEvent event) {
+            if (!(event.getInventory().getHolder(false) instanceof VaultInventory vault)) return;
 
-        ItemStack[] itemArray = items.toArray(new ItemStack[0]);
+            List<ItemStack> vaultItems = new ArrayList<>(Arrays.asList(event.getInventory().getContents()));
 
-        for (ItemStack item : itemArray) {
-            byte[] data = item == null || item.getType() == Material.AIR ? new byte[]{} : item.serializeAsBytes();
-
-            stream.writeInt(data.length);
-            stream.write(data);
-        }
-
-        stream.writeInt(-1);
-        return stream.toByteArray();
-    }
-
-    private ItemStack[] deserializeItemStackByteArray(byte[] bytes) {
-        List<ItemStack> items = new ArrayList<>();
-        ByteArrayDataInput inputStream = ByteStreams.newDataInput(bytes);
-        while (true) {
-            int length = inputStream.readInt();
-            if (length == -1) break;
-            if (length == 0) {
-                items.add(null);
-            } else {
-                byte[] data = new byte[length];
-                inputStream.readFully(data);
-                items.add(ItemStack.deserializeBytes(data));
+            try {
+                Files.write(vault.getPlayerVaultFile().toPath(), ItemUtil.serializeItemStackList(vaultItems));
+            } catch (IOException e) {
+                MagicSpells.error("Vault Spell " + vault.getVaultName() + " encountered an error saving items when closing the vault");
+                throw new RuntimeException(e);
             }
+
+            openedVaultsList.remove(event.getPlayer().getUniqueId());
         }
 
-        return items.toArray(new ItemStack[0]);
-    }
-
-    @EventHandler
-    public void onInventoryClose(InventoryCloseEvent event) {
-        if (!(event.getInventory().getHolder(false) instanceof  VaultInventory vault)) return;
-
-        List<ItemStack> vaultItems = new ArrayList<>(Arrays.asList(event.getInventory().getContents()));
-
-        try {
-            Files.write(vault.getPlayerVaultFile().toPath(), serializeItemStackList(vaultItems));
-        } catch (IOException e) {
-            MagicSpells.error("Vault Spell " + internalName + " encountered an error saving items when closing the vault");
-            throw new RuntimeException(e);
-        }
-
-        openedVaultsList.remove(event.getPlayer().getUniqueId());
     }
 
     private static class VaultInventory implements InventoryHolder {
